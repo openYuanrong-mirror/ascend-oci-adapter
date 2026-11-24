@@ -66,6 +66,7 @@ type device struct {
 type editsRequest struct {
 	SchemaVersion int     `json:"schema_version"`
 	LogicIDs      []int32 `json:"logic_ids"`
+	DeviceNodeIDs []int32 `json:"device_node_ids,omitempty"`
 	RuntimeFamily string  `json:"runtime_family"`
 	PhysicalOnly  bool    `json:"physical_only"`
 	MountProfile  string  `json:"mount_profile"`

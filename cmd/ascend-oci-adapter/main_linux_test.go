@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"ascend-common/api"
+	cdispec "tags.cncf.io/container-device-interface/specs-go"
 )
 
 func TestAdapterLogPathMustBeAbsolute(t *testing.T) {
@@ -44,5 +45,22 @@ func TestProductSpecForDevType(t *testing.T) {
 	}
 	if _, err := productSpecForDevType(api.Ascend910A); err == nil {
 		t.Fatal("unsupported Ascend910A family must be rejected")
+	}
+}
+
+func TestFlattenSparse310PDeviceID(t *testing.T) {
+	node := &cdispec.DeviceNode{HostPath: "/dev/davinci2", Path: "/dev/davinci2", Type: "c", Major: 238, Minor: 2}
+	spec := &cdispec.Spec{Devices: []cdispec.Device{{
+		Name: "2", ContainerEdits: cdispec.ContainerEdits{DeviceNodes: []*cdispec.DeviceNode{node}},
+	}}}
+	result, err := flattenSpec(spec, []int32{1}, []int32{2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Devices) != 1 || result.Devices[0].HostPath != node.HostPath || result.Devices[0].Minor != 2 {
+		t.Fatalf("unexpected device edits: %+v", result.Devices)
+	}
+	if result.Env["ASCEND_RT_VISIBLE_DEVICES"] != "1" || result.Env["ASCEND_VISIBLE_DEVICES"] != "1" {
+		t.Fatalf("unexpected visibility environment: %v", result.Env)
 	}
 }
