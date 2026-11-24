@@ -155,7 +155,9 @@ func discover() (discoveryResponse, error) {
 		health, healthErr := manager.GetDeviceHealth(logicID)
 		devices = append(devices, device{
 			SchedulerID: uint32(logicID), LogicID: logicID, PhysicalID: physicalID,
-			StableID: stableID, ProductModel: productModel, Generation: product.Generation,
+			// MindCluster's whole-device allocation uses the physical ID for these supported families.
+			DeviceNodeID: physicalID,
+			StableID:     stableID, ProductModel: productModel, Generation: product.Generation,
 			RuntimeFamily: product.RuntimeFamily, ResourceFamily: product.ResourceFamily,
 			RawProduct: rawProduct, Healthy: healthErr == nil && health == 0,
 		})
@@ -168,7 +170,15 @@ func buildEdits(request editsRequest) (editsResponse, error) {
 		!supportedRuntimeFamily(request.RuntimeFamily) || len(request.LogicIDs) == 0 {
 		return editsResponse{}, errors.New("invalid physical Ascend edits request")
 	}
-	deviceIDs := make([]int, len(request.LogicIDs))
+	nodeIDs := request.LogicIDs
+	if len(request.DeviceNodeIDs) != 0 {
+		if len(request.DeviceNodeIDs) != len(request.LogicIDs) {
+			return editsResponse{}, errors.New("invalid Ascend device node IDs")
+		}
+		nodeIDs = request.DeviceNodeIDs
+	}
+	deviceIDs := make([]int, len(nodeIDs))
+	seenNodes := make(map[int32]struct{}, len(nodeIDs))
 	seen := make(map[int32]struct{}, len(request.LogicIDs))
 	for index, logicID := range request.LogicIDs {
 		if logicID < 0 {
@@ -178,7 +188,15 @@ func buildEdits(request editsRequest) (editsResponse, error) {
 			return editsResponse{}, fmt.Errorf("duplicate logic ID %d", logicID)
 		}
 		seen[logicID] = struct{}{}
-		deviceIDs[index] = int(logicID)
+		nodeID := nodeIDs[index]
+		if nodeID < 0 {
+			return editsResponse{}, fmt.Errorf("invalid device node ID %d", nodeID)
+		}
+		if _, duplicate := seenNodes[nodeID]; duplicate {
+			return editsResponse{}, fmt.Errorf("duplicate device node ID %d", nodeID)
+		}
+		seenNodes[nodeID] = struct{}{}
+		deviceIDs[index] = int(nodeID)
 	}
 	if filepath.Base(request.MountProfile) != "mounts.json" {
 		return editsResponse{}, errors.New("mount profile must name mounts.json")
@@ -190,27 +208,34 @@ func buildEdits(request editsRequest) (editsResponse, error) {
 	if err != nil {
 		return editsResponse{}, err
 	}
-	return flattenSpec(spec, request.LogicIDs)
+	return flattenSpec(spec, request.LogicIDs, nodeIDs)
+}
+
+// supportedProducts is the admission policy for physical devices. OCI generation
+// uses the discovered node IDs and delegates variant-specific edits to CDI.
+var supportedProducts = map[string]productSpec{
+	api.Ascend310P:  {Generation: "310P", RuntimeFamily: "Ascend310P", ResourceFamily: "huawei.com/Ascend310P"},
+	api.Ascend910B:  {Generation: "A2", RuntimeFamily: "Ascend910", ResourceFamily: "huawei.com/Ascend910"},
+	api.Ascend910A3: {Generation: "A3", RuntimeFamily: "Ascend910", ResourceFamily: "huawei.com/Ascend910"},
 }
 
 func supportedRuntimeFamily(runtimeFamily string) bool {
-	return runtimeFamily == "Ascend310P" || runtimeFamily == "Ascend910"
+	for _, product := range supportedProducts {
+		if product.RuntimeFamily == runtimeFamily {
+			return true
+		}
+	}
+	return false
 }
 
 func productSpecForDevType(devType string) (productSpec, error) {
-	switch devType {
-	case api.Ascend310P:
-		return productSpec{Generation: "310P", RuntimeFamily: "Ascend310P", ResourceFamily: "huawei.com/Ascend310P"}, nil
-	case api.Ascend910B:
-		return productSpec{Generation: "A2", RuntimeFamily: "Ascend910", ResourceFamily: "huawei.com/Ascend910"}, nil
-	case api.Ascend910A3:
-		return productSpec{Generation: "A3", RuntimeFamily: "Ascend910", ResourceFamily: "huawei.com/Ascend910"}, nil
-	default:
-		return productSpec{}, fmt.Errorf("unsupported Ascend device family %q", devType)
+	if product, ok := supportedProducts[devType]; ok {
+		return product, nil
 	}
+	return productSpec{}, fmt.Errorf("unsupported Ascend device family %q", devType)
 }
 
-func flattenSpec(spec *cdispec.Spec, logicIDs []int32) (editsResponse, error) {
+func flattenSpec(spec *cdispec.Spec, logicIDs, nodeIDs []int32) (editsResponse, error) {
 	response := editsResponse{
 		SchemaVersion: schemaVersion, ProviderVersion: providerVersion(),
 		Env: make(map[string]string),
@@ -219,10 +244,10 @@ func flattenSpec(spec *cdispec.Spec, logicIDs []int32) (editsResponse, error) {
 	for _, current := range spec.Devices {
 		byName[current.Name] = current.ContainerEdits
 	}
-	for _, logicID := range logicIDs {
-		edits, ok := byName[strconv.Itoa(int(logicID))]
+	for _, nodeID := range nodeIDs {
+		edits, ok := byName[strconv.Itoa(int(nodeID))]
 		if !ok {
-			return editsResponse{}, fmt.Errorf("CDI spec is missing logic ID %d", logicID)
+			return editsResponse{}, fmt.Errorf("CDI spec is missing device node ID %d", nodeID)
 		}
 		for _, node := range edits.DeviceNodes {
 			response.Devices = append(response.Devices, flattenDevice(node))

@@ -18,9 +18,11 @@ package main
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"ascend-common/api"
+	cdispec "tags.cncf.io/container-device-interface/specs-go"
 )
 
 func TestAdapterLogPathMustBeAbsolute(t *testing.T) {
@@ -44,5 +46,33 @@ func TestProductSpecForDevType(t *testing.T) {
 	}
 	if _, err := productSpecForDevType(api.Ascend910A); err == nil {
 		t.Fatal("unsupported Ascend910A family must be rejected")
+	}
+}
+
+func TestBuildEditsAcceptsExplicitAscend910DeviceNodes(t *testing.T) {
+	_, err := buildEdits(editsRequest{
+		SchemaVersion: schemaVersion, LogicIDs: []int32{1}, DeviceNodeIDs: []int32{2},
+		RuntimeFamily: "Ascend910", PhysicalOnly: true,
+	})
+	// An empty mount profile stops the test before CDI accesses the host.
+	if err == nil || !strings.Contains(err.Error(), "mount profile must name mounts.json") {
+		t.Fatalf("valid node IDs must reach mount profile validation, got %v", err)
+	}
+}
+
+func TestFlattenSparseDeviceID(t *testing.T) {
+	node := &cdispec.DeviceNode{HostPath: "/dev/davinci2", Path: "/dev/davinci2", Type: "c", Major: 238, Minor: 2}
+	spec := &cdispec.Spec{Devices: []cdispec.Device{{
+		Name: "2", ContainerEdits: cdispec.ContainerEdits{DeviceNodes: []*cdispec.DeviceNode{node}},
+	}}}
+	result, err := flattenSpec(spec, []int32{1}, []int32{2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Devices) != 1 || result.Devices[0].HostPath != node.HostPath || result.Devices[0].Minor != 2 {
+		t.Fatalf("unexpected device edits: %+v", result.Devices)
+	}
+	if result.Env["ASCEND_RT_VISIBLE_DEVICES"] != "1" || result.Env["ASCEND_VISIBLE_DEVICES"] != "1" {
+		t.Fatalf("unexpected visibility environment: %v", result.Env)
 	}
 }

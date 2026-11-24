@@ -44,6 +44,13 @@ Protocol schema 1 is preserved. The provider version identifies both the
 adapter build and pinned MindCluster dependency, for example
 `v0.1.0+mindcluster-v26.2.0.beta.1`.
 
+For supported physical devices, `discover` reports the `device_node_id`
+used in `/dev/davinciN`, separately from the scheduling and logical IDs.
+Pass these discovered node IDs as `device_node_ids`, in the same order as
+`logic_ids`. CDI uses the node IDs for the device paths, while the
+visibility environment continues to use the logical IDs. Omitting
+`device_node_ids` retains the original schema-v1 behavior for legacy callers.
+
 ## Release bundle
 
 ```bash

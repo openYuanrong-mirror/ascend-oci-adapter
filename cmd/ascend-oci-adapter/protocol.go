@@ -54,6 +54,7 @@ type device struct {
 	SchedulerID    uint32 `json:"scheduler_id"`
 	LogicID        int32  `json:"logic_id"`
 	PhysicalID     int32  `json:"physical_id"`
+	DeviceNodeID   int32  `json:"device_node_id"`
 	StableID       string `json:"stable_id"`
 	ProductModel   string `json:"product_model"`
 	Generation     string `json:"generation"`
@@ -66,6 +67,7 @@ type device struct {
 type editsRequest struct {
 	SchemaVersion int     `json:"schema_version"`
 	LogicIDs      []int32 `json:"logic_ids"`
+	DeviceNodeIDs []int32 `json:"device_node_ids,omitempty"`
 	RuntimeFamily string  `json:"runtime_family"`
 	PhysicalOnly  bool    `json:"physical_only"`
 	MountProfile  string  `json:"mount_profile"`
