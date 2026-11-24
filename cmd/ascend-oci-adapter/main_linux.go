@@ -155,7 +155,9 @@ func discover() (discoveryResponse, error) {
 		health, healthErr := manager.GetDeviceHealth(logicID)
 		devices = append(devices, device{
 			SchedulerID: uint32(logicID), LogicID: logicID, PhysicalID: physicalID,
-			StableID: stableID, ProductModel: productModel, Generation: product.Generation,
+			// MindCluster's whole-device allocation uses the physical ID for these supported families.
+			DeviceNodeID: physicalID,
+			StableID:     stableID, ProductModel: productModel, Generation: product.Generation,
 			RuntimeFamily: product.RuntimeFamily, ResourceFamily: product.ResourceFamily,
 			RawProduct: rawProduct, Healthy: healthErr == nil && health == 0,
 		})
@@ -170,7 +172,7 @@ func buildEdits(request editsRequest) (editsResponse, error) {
 	}
 	nodeIDs := request.LogicIDs
 	if len(request.DeviceNodeIDs) != 0 {
-		if request.RuntimeFamily != "Ascend310P" || len(request.DeviceNodeIDs) != len(request.LogicIDs) {
+		if len(request.DeviceNodeIDs) != len(request.LogicIDs) {
 			return editsResponse{}, errors.New("invalid Ascend device node IDs")
 		}
 		nodeIDs = request.DeviceNodeIDs
@@ -209,21 +211,28 @@ func buildEdits(request editsRequest) (editsResponse, error) {
 	return flattenSpec(spec, request.LogicIDs, nodeIDs)
 }
 
+// supportedProducts is the admission policy for physical devices. OCI generation
+// uses the discovered node IDs and delegates variant-specific edits to CDI.
+var supportedProducts = map[string]productSpec{
+	api.Ascend310P:  {Generation: "310P", RuntimeFamily: "Ascend310P", ResourceFamily: "huawei.com/Ascend310P"},
+	api.Ascend910B:  {Generation: "A2", RuntimeFamily: "Ascend910", ResourceFamily: "huawei.com/Ascend910"},
+	api.Ascend910A3: {Generation: "A3", RuntimeFamily: "Ascend910", ResourceFamily: "huawei.com/Ascend910"},
+}
+
 func supportedRuntimeFamily(runtimeFamily string) bool {
-	return runtimeFamily == "Ascend310P" || runtimeFamily == "Ascend910"
+	for _, product := range supportedProducts {
+		if product.RuntimeFamily == runtimeFamily {
+			return true
+		}
+	}
+	return false
 }
 
 func productSpecForDevType(devType string) (productSpec, error) {
-	switch devType {
-	case api.Ascend310P:
-		return productSpec{Generation: "310P", RuntimeFamily: "Ascend310P", ResourceFamily: "huawei.com/Ascend310P"}, nil
-	case api.Ascend910B:
-		return productSpec{Generation: "A2", RuntimeFamily: "Ascend910", ResourceFamily: "huawei.com/Ascend910"}, nil
-	case api.Ascend910A3:
-		return productSpec{Generation: "A3", RuntimeFamily: "Ascend910", ResourceFamily: "huawei.com/Ascend910"}, nil
-	default:
-		return productSpec{}, fmt.Errorf("unsupported Ascend device family %q", devType)
+	if product, ok := supportedProducts[devType]; ok {
+		return product, nil
 	}
+	return productSpec{}, fmt.Errorf("unsupported Ascend device family %q", devType)
 }
 
 func flattenSpec(spec *cdispec.Spec, logicIDs, nodeIDs []int32) (editsResponse, error) {

@@ -18,6 +18,7 @@ package main
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"ascend-common/api"
@@ -48,7 +49,18 @@ func TestProductSpecForDevType(t *testing.T) {
 	}
 }
 
-func TestFlattenSparse310PDeviceID(t *testing.T) {
+func TestBuildEditsAcceptsExplicitAscend910DeviceNodes(t *testing.T) {
+	_, err := buildEdits(editsRequest{
+		SchemaVersion: schemaVersion, LogicIDs: []int32{1}, DeviceNodeIDs: []int32{2},
+		RuntimeFamily: "Ascend910", PhysicalOnly: true,
+	})
+	// An empty mount profile stops the test before CDI accesses the host.
+	if err == nil || !strings.Contains(err.Error(), "mount profile must name mounts.json") {
+		t.Fatalf("valid node IDs must reach mount profile validation, got %v", err)
+	}
+}
+
+func TestFlattenSparseDeviceID(t *testing.T) {
 	node := &cdispec.DeviceNode{HostPath: "/dev/davinci2", Path: "/dev/davinci2", Type: "c", Major: 238, Minor: 2}
 	spec := &cdispec.Spec{Devices: []cdispec.Device{{
 		Name: "2", ContainerEdits: cdispec.ContainerEdits{DeviceNodes: []*cdispec.DeviceNode{node}},
